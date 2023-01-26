@@ -88,17 +88,17 @@
 
 		vendor = <0x1204>;
 		device = <0x0001>;
-		irqnum = <32>;
+		irqnum = <16>;
 
 		#address-cells = <2>;
 		#size-cells = <1>;
 		interrupt-controller;
 		#interrupt-cells = <1>;
+		interrupt-parent = <&tsfpga_pcie>;
 
-		pc104; /* Configures PC104 header as the PC104 signals, not GPIO */
+		/*pc104; /* Configures PC104 header as the PC104 signals, not GPIO */
 
 		/* <ranges> is set in the driver at runtime */
-
 		ts7800v2_can: ts7800v2-can@2,0 {
 			compatible = "technologic,ts7800v2-can";
 			#address-cells = <0x1>;
@@ -259,7 +259,11 @@
 		ts7800v2_gpio: ts7800v2-gpio {   /* drivers/gpio/gpio-ts7800-v2.c */
                 	compatible = "technologic,ts7800v2-gpio";
                 	gpio-controller;
-                	#gpio-cells = <2>;
+			#gpio-cells = <2>;
+			interrupt-controller;
+			#interrupt-cells = <2>;
+			interrupt-parent = <&tsfpga_pcie>;
+			ts7800v2,interrupt-ranges = <0x4d 3 1>, <0x4c 4 1>, <0x4b 5 1>, <0x4a 6 1>, <0x49 7 1>;
                 	base = <64>;
                 	ngpios = <118>;
                 	#address-cells = <0x1>;

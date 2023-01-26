@@ -19,6 +19,7 @@
 #include <linux/spinlock.h>
 #include <linux/module.h>
 #include <linux/pci.h>
+#include <linux/of_irq.h>
 
 #define TS7800V2_NR_DIO	   121
 #define TS7800V2_DIO_BASE  64
@@ -26,6 +27,7 @@
 struct ts7800v2_gpio_priv {
 	void __iomem  *syscon;
 	struct gpio_chip gpio_chip;
+	struct irq_chip irq;
 	spinlock_t lock;
 	/* direction[4] is enough for 128 DIOs, 1=in, 0=out */
 	unsigned int direction[4];
@@ -417,6 +419,61 @@ static const struct gpio_chip template_chip = {
 	.can_sleep		= false,
 };
 
+
+static int ts7800v2_gpio_irq_get_parent_hwirq(struct gpio_chip *gc,
+					      unsigned int hwirq)
+{
+
+	struct device *dev = gc->parent;
+	struct device_node *node = dev->of_node;
+	const char * prop_name = "ts7800v2,interrupt-ranges";
+	const __be32 *range;
+	u32 base, parent_base, size;
+	int len;
+
+	range = of_get_property(node, prop_name, &len);
+	if (!range)
+		return -EINVAL;
+
+	len /= sizeof(*range);
+	dev_dbg(dev, "%s has %di elements mapped\n", prop_name,len);
+
+	for (; len >= 3; len -= 3) {
+		base = be32_to_cpu(*range++);
+		parent_base = be32_to_cpu(*range++);
+		size = be32_to_cpu(*range++);
+
+		dev_dbg(dev, "hwirq %u, base %x, parent_base %x, size %u\n", 
+			hwirq,
+			base,
+			parent_base,
+			size);
+		if (base <= hwirq && hwirq < base + size)
+			return hwirq - base + parent_base;
+	}
+
+	return -ENOENT;
+}
+
+static int ts7800v2_gpio_child_to_parent_hwirq(struct gpio_chip *gc,
+					     unsigned int child,
+					     unsigned int child_type,
+					     unsigned int *parent,
+					     unsigned int *parent_type)
+{
+	int mapped_irq;
+	/* All these interrupts are level high in the CPU */
+	*parent_type = IRQ_TYPE_NONE;
+
+	mapped_irq = ts7800v2_gpio_irq_get_parent_hwirq(gc, child);
+	if (mapped_irq < 0)
+		return mapped_irq;
+
+	*parent = mapped_irq;
+
+	return 0;
+}
+
 static const struct of_device_id ts7800v2_gpio_of_match_table[] = {
 	{
 		.compatible = "technologic,ts7800v2-gpio",
@@ -434,6 +491,9 @@ static int ts7800v2_gpio_probe(struct platform_device *pdev)
 	u32 reg;
 	int ret;
 	void __iomem  *membase;
+	struct gpio_irq_chip *girq;
+	struct device_node *parent_np;
+	struct irq_domain *parent_domain;
 
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	if (!res) {
@@ -470,7 +530,30 @@ static int ts7800v2_gpio_probe(struct platform_device *pdev)
 
 	platform_set_drvdata(pdev, priv);
 
-	ret = gpiochip_add(&priv->gpio_chip);
+	/* Set up the irqchip dynamically */
+	priv->irq.name = "ts7800v2_gpio_irqc";
+
+	/* Get a pointer to the gpio_irq_chip */
+	girq = &priv->gpio_chip.irq;
+	girq->chip = &priv->irq;
+	
+	// Hierarchical IRQ Domain
+	parent_np = of_irq_find_parent(dev->of_node);
+	if (!parent_np)
+		return -ENXIO;
+
+	parent_domain = irq_find_host(parent_np);
+	of_node_put(parent_np);
+	if (!parent_domain)
+		return -EPROBE_DEFER;
+
+	girq->default_type = IRQ_TYPE_NONE;
+	girq->handler = handle_bad_irq;
+	girq->fwnode = pdev->dev.fwnode;
+	girq->parent_domain = parent_domain;
+	girq->child_to_parent_hwirq = ts7800v2_gpio_child_to_parent_hwirq;
+	
+	ret = devm_gpiochip_add_data(&pdev->dev, &priv->gpio_chip, priv);
 	if (ret < 0) {
 		dev_err(&pdev->dev, "Unable to register gpiochip\n");
 		return ret;
@@ -483,10 +566,6 @@ static int ts7800v2_gpio_probe(struct platform_device *pdev)
 
 static int ts7800v2_gpio_remove(struct platform_device *pdev)
 {
-	struct ts7800v2_gpio_priv *priv = platform_get_drvdata(pdev);
-
-	if (priv)
-		gpiochip_remove(&priv->gpio_chip);
 	return 0;
 }
 

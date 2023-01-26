@@ -2,7 +2,7 @@
 /*
  * PCI device tree support
  *
- * Copyright (C) 2022 Mark Featherston <mark@embeddedTS.com>
+ * Copyright (C) 2022 Mark Feathersfpga + TSbeddedTS.com>
  */
 
 #include <linux/irq.h>
@@ -12,13 +12,15 @@
 #include <linux/module.h>
 #include <linux/of_device.h>
 #include <linux/pci.h>
+#include <linux/of_irq.h>
+
 
 /* If present, IRQC base is 0x200
  * 0x0 = doorbell_adr
  * 0x4 = doorbell_msk (1 = enabled)
  * 0x8 = irqs
  */
-
+#define MSI_MAX								32
 #define TS7800V2_IRQC		0x200
 #define TS7800V2_IRQC_MASK_REG	0x4
 #define TS7800V2_IRQC_IRQS	0x8
@@ -101,16 +103,63 @@ out:
 	chained_irq_exit(chip, desc);
 }
 
-static struct irq_chip pci_irq_chip = {
-	.name = "tsmfd_irq",
-};
+
+
+// static struct irq_chip pci_irq_chip = {
+// 	.name = "tsmfd_irq",
+// };
+
+static int tsmfd_irq_domain_translate(struct irq_domain *domain,
+					struct irq_fwspec *fwspec,
+					unsigned long *hwirq,
+					unsigned int *type)
+{
+
+	if (is_of_node(fwspec->fwnode)) {
+		*hwirq = fwspec->param[0];
+		*type = fwspec->param[1];
+		return 0;
+	}
+
+	return -EINVAL;
+ }
+
+static int tsmfd_irq_domain_alloc(struct irq_domain *domain, unsigned int virq,
+				  unsigned int nr_irqs, void *args)
+{
+
+	struct tsmfd_of_priv *priv = domain->host_data;
+	struct device *dev = priv->chip.parent_device;
+	struct irq_fwspec *fwspec = args;
+	irq_hw_number_t hwirq;
+	int type;
+	int ret;
+
+	if(nr_irqs != 1)
+		return -EINVAL;
+
+	hwirq = fwspec->param[0];
+
+	ret = tsmfd_irq_domain_translate(domain, fwspec, &hwirq, &type);
+	if(ret) {
+		dev_err(dev, "Error in IRQ domain translation\n");
+		return ret;
+	}
+
+	dev_info(dev, "Allocating IRQ %d in domain %s\n", virq, domain->name);
+	irq_domain_set_info(domain, virq, hwirq, &priv->chip,
+			priv, handle_simple_irq, NULL, NULL);
+
+ return 0;
+
+}
 
 static int tsmfd_irqdomain_map(struct irq_domain *d,
 		unsigned int virq, irq_hw_number_t hwirq)
 {
 	struct tsmfd_of_priv *priv = d->host_data;
 
-	irq_set_chip_and_handler(virq, &pci_irq_chip,
+	irq_set_chip_and_handler(virq, &priv->chip,
 				 handle_simple_irq);
 	irq_set_chip_data(virq, priv);
 	irq_clear_status_flags(virq, IRQ_NOREQUEST);
@@ -122,6 +171,9 @@ static int tsmfd_irqdomain_map(struct irq_domain *d,
 static const struct irq_domain_ops tsmfd_irqdomain_ops = {
 	.map = tsmfd_irqdomain_map,
 	.xlate = irq_domain_xlate_onecell,
+	.alloc = tsmfd_irq_domain_alloc,
+	.free = irq_domain_free_irqs_common,
+	.translate = tsmfd_irq_domain_translate,
 };
 
 static int ts7800v2_irqc_enable(struct pci_dev *pdev, struct device_node *np, u32 irqnum)
@@ -141,13 +193,19 @@ static int ts7800v2_irqc_enable(struct pci_dev *pdev, struct device_node *np, u3
 	spin_lock_init(&priv->lock);
 	priv->fpgabase = pci_ioremap_bar(pdev, 2);
 	priv->irqnum = irqnum;
-	priv->domain = irq_domain_add_linear(np, irqnum, &tsmfd_irqdomain_ops, priv);
+	priv->chip.name = "tsmfd_irqc";
+	priv->chip.parent_device = dev;
+	// priv->domain = irq_domain_add_linear(np, irqnum, &tsmfd_irqdomain_ops, priv);
+	priv->domain = irq_domain_add_linear(np, 32, &tsmfd_irqdomain_ops, priv);
 	if (!priv->domain) {
 		dev_err(dev, "Couldn't create IRQ domain");
 		return -ENODEV;
 	}
 
-	priv->mask = 0xFFF0000;
+
+
+	// priv->mask = 0xFFF00E0;
+	priv->mask = 0x08000010;
 	writel(priv->mask, priv->fpgabase + TS7800V2_IRQC + TS7800V2_IRQC_MASK_REG);
 
 	for (i = 0; i < irqnum; i++) {
@@ -156,6 +214,7 @@ static int ts7800v2_irqc_enable(struct pci_dev *pdev, struct device_node *np, u3
 			tsmfd_chained_irq_handler, priv);
 	}
 
+	pci_set_drvdata(pdev, priv);	
 	return 0;
 }
 
