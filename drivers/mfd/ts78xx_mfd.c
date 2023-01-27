@@ -96,7 +96,10 @@ static void tsmfd_chained_irq_handler(struct irq_desc *desc)
 		int irq = irq_find_mapping(priv->domain, bit);
 
 		status &= ~(1 << bit);
-		generic_handle_irq(irq);
+		if(irq>0) 
+			generic_handle_irq(irq);
+		else
+			handle_bad_irq(desc);
 	} while (status);
 
 out:
@@ -146,7 +149,7 @@ static int tsmfd_irq_domain_alloc(struct irq_domain *domain, unsigned int virq,
 		return ret;
 	}
 
-	dev_info(dev, "Allocating IRQ %d in domain %s\n", virq, domain->name);
+	dev_dbg(dev, "Allocating IRQ %d in domain %s\n", virq, domain->name);
 	irq_domain_set_info(domain, virq, hwirq, &priv->chip,
 			priv, handle_simple_irq, NULL, NULL);
 
@@ -176,6 +179,22 @@ static const struct irq_domain_ops tsmfd_irqdomain_ops = {
 	.translate = tsmfd_irq_domain_translate,
 };
 
+static void tsmfd_irq_mask(struct irq_data *data) {
+	struct tsmfd_of_priv *priv = irq_data_get_irq_chip_data(data);
+	const unsigned long mask = BIT(irqd_to_hwirq(data));
+
+	priv->mask &= ~mask;
+	
+};
+
+static void tsmfd_irq_unmask(struct irq_data *data) {
+	struct tsmfd_of_priv *priv = irq_data_get_irq_chip_data(data);
+	const unsigned long mask = BIT(irqd_to_hwirq(data));
+
+	priv->mask |= mask;
+	
+};
+
 static int ts7800v2_irqc_enable(struct pci_dev *pdev, struct device_node *np, u32 irqnum)
 {
 	struct tsmfd_of_priv *priv;
@@ -195,18 +214,21 @@ static int ts7800v2_irqc_enable(struct pci_dev *pdev, struct device_node *np, u3
 	priv->irqnum = irqnum;
 	priv->chip.name = "tsmfd_irqc";
 	priv->chip.parent_device = dev;
-	// priv->domain = irq_domain_add_linear(np, irqnum, &tsmfd_irqdomain_ops, priv);
+	priv->chip.irq_mask = tsmfd_irq_mask;
+	priv->chip.irq_unmask = tsmfd_irq_unmask;
+
+	// Allocated 32 interrupts irrespectively of requested number
 	priv->domain = irq_domain_add_linear(np, 32, &tsmfd_irqdomain_ops, priv);
 	if (!priv->domain) {
 		dev_err(dev, "Couldn't create IRQ domain");
 		return -ENODEV;
 	}
 
-
-
-	// priv->mask = 0xFFF00E0;
-	priv->mask = 0x08000010;
+	// Fixed hw mask
+	priv->mask = 0x0FFF00F0;
 	writel(priv->mask, priv->fpgabase + TS7800V2_IRQC + TS7800V2_IRQC_MASK_REG);
+	// It will be masked by software
+	priv->mask = 0x0;
 
 	for (i = 0; i < irqnum; i++) {
 		priv->map[i] =  pci_irq_vector(pdev, i);

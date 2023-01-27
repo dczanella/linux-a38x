@@ -532,6 +532,8 @@ static int ts7800v2_gpio_probe(struct platform_device *pdev)
 
 	/* Set up the irqchip dynamically */
 	priv->irq.name = "ts7800v2_gpio_irqc";
+	priv->irq.irq_mask = irq_chip_mask_parent;
+	priv->irq.irq_unmask = irq_chip_unmask_parent;
 
 	/* Get a pointer to the gpio_irq_chip */
 	girq = &priv->gpio_chip.irq;
