@@ -8,6 +8,7 @@
 #include "armada-385.dtsi"
 
 #include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/leds/common.h>
 
 / {
 	model = "embeddedTS TS-7800-V2";
@@ -43,6 +44,11 @@
 		compatible = "gpio-leds";
 		status = "okay";
 
+		external-test-led {
+			gpios = <&ts7800v2_gpio 56 GPIO_ACTIVE_HIGH>;
+			linux,default-trigger = "heartbeat";
+		};
+		
 		green-led {
 			gpios = <&ts7800v2_gpio 118 GPIO_ACTIVE_HIGH>;
 			linux,default-trigger = "heartbeat";
@@ -50,6 +56,13 @@
 
 		red-led {
 			gpios = <&ts7800v2_gpio 119 GPIO_ACTIVE_HIGH>;
+			default-state = "off";
+		};
+
+		amb_te_led: amb-te-led {
+			label = "amb-te-led";
+			gpios = <&ts7800v2_gpio 79 GPIO_ACTIVE_HIGH>;
+			function = LED_FUNCTION_FLASH;
 			default-state = "off";
 		};
 
@@ -99,6 +112,16 @@
 		/*pc104; /* Configures PC104 header as the PC104 signals, not GPIO */
 
 		/* <ranges> is set in the driver at runtime */
+		
+		amb_te: amb_te {
+			compatible = "llama-amb-te";
+			amb_te-gpios = <&ts7800v2_gpio 76 GPIO_ACTIVE_HIGH>;
+			/*amb_led-gpios = <&ts7800v2_gpio 79 GPIO_ACTIVE_HIGH>;*/
+			interrupt-parent = <&ts7800v2_gpio>;
+			interrupts = <76 GPIO_ACTIVE_LOW>;
+			leds = <&amb_te_led>;
+		};
+
 		ts7800v2_can: ts7800v2-can@2,0 {
 			compatible = "technologic,ts7800v2-can";
 			#address-cells = <0x1>;
