@@ -1,10 +1,13 @@
-// SPDX-License-Identifier: GPL-2.0-only
 /*
  * drivers/clocksource/arm_global_timer.c
  *
  * Copyright (C) 2013 STMicroelectronics (R&D) Limited.
  * Author: Stuart Menefy <stuart.menefy@st.com>
  * Author: Srinivas Kandagatla <srinivas.kandagatla@st.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
  */
 
 #include <linux/init.h>
@@ -77,10 +80,11 @@ static u64 notrace _gt_counter_read(void)
 	return counter;
 }
 
-static u64 gt_counter_read(void)
+u64 gt_counter_read(void)
 {
 	return _gt_counter_read();
 }
+EXPORT_SYMBOL_GPL(gt_counter_read);
 
 /**
  * To ensure that updates to comparator value register do not set the
