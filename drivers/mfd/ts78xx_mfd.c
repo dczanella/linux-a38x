@@ -149,7 +149,7 @@ static int tsmfd_irq_domain_alloc(struct irq_domain *domain, unsigned int virq,
 		return ret;
 	}
 
-	dev_dbg(dev, "Allocating IRQ %d in domain %s\n", virq, domain->name);
+	dev_dbg(dev, "Allocating IRQ %d in domain %s with hwirq %ld\n", virq, domain->name, hwirq);
 	irq_domain_set_info(domain, virq, hwirq, &priv->chip,
 			priv, handle_simple_irq, NULL, NULL);
 

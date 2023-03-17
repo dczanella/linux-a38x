@@ -68,11 +68,9 @@ static DEFINE_SPINLOCK(fpga_lock);
 
 static u8 ts7800v2_read_reg(const struct sja1000_priv *priv, int reg)
 {
-   unsigned long flags;
    volatile unsigned int *syscon = (unsigned int *)priv->reg_base;
    unsigned int v;
 
-   spin_lock_irqsave(&fpga_lock, flags);
 
    while(readl(&syscon[CAN_CNTL_REG_OFFSET / 4]) & CAN_CNTL_START);
 
@@ -87,13 +85,11 @@ static u8 ts7800v2_read_reg(const struct sja1000_priv *priv, int reg)
       reg, (v >> 8) & 0xFF, v);
 #endif
 
-   spin_unlock_irqrestore(&fpga_lock, flags);
    return (v >> 8) & 0xFF;
 }
 
 static void ts7800v2_write_reg(const struct sja1000_priv *priv, int reg, u8 val)
 {
-   unsigned long flags;
    volatile unsigned int *syscon = (unsigned int *)priv->reg_base;
 
 #if (DEBUG)
@@ -101,11 +97,9 @@ static void ts7800v2_write_reg(const struct sja1000_priv *priv, int reg, u8 val)
       CAN_CNTL_START | CAN_CNTL_WRITE | reg | ((u16)val << 8));
 #endif
 
-   spin_lock_irqsave(&fpga_lock, flags);
    while(readl(&syscon[CAN_CNTL_REG_OFFSET / 4]) & CAN_CNTL_START);
 
    writel(CAN_CNTL_START | CAN_CNTL_WRITE | reg | ((u16)val << 8), &syscon[CAN_CNTL_REG_OFFSET / 4]);
-   spin_unlock_irqrestore(&fpga_lock, flags);
 
 }
 
@@ -198,7 +192,7 @@ static int ts7800v2_can_probe(struct platform_device *pdev)
 
    priv = netdev_priv(ndev);
    ndev->irq = irq->start;
-   priv->irq_flags = IRQF_SHARED;
+   priv->irq_flags = IRQF_SHARED | IRQF_NO_THREAD;
    priv->reg_base = addr;
    priv->ocr = OCR_TX0_PULLUP | OCR_TX1_PULLUP | OCR_MODE_NORMAL;
    priv->cdr = CDR_CBP | CDR_PELICAN; /* comparator bypass, pelican mode */
