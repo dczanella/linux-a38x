@@ -28,7 +28,6 @@ struct ts7800v2_gpio_priv {
 	void __iomem  *syscon;
 	struct gpio_chip gpio_chip;
 	struct irq_chip irq;
-	spinlock_t lock;
 	/* direction[4] is enough for 128 DIOs, 1=in, 0=out */
 	unsigned int direction[4];
 	unsigned int ovalue[4];
@@ -204,12 +203,10 @@ static int ts7800v2_gpio_direction_input(struct gpio_chip *chip,
 {
 	struct ts7800v2_gpio_priv *priv = to_gpio_ts7800v2(chip);
 	unsigned int reg, bit;
-	unsigned long flags;
 
 	if (offset >= TS7800V2_NR_DIO)
 		return -EINVAL;
 
-	spin_lock_irqsave(&priv->lock, flags);
 
 
 	priv->direction[offset / 32] |= (1 << offset % 32);
@@ -243,7 +240,6 @@ static int ts7800v2_gpio_direction_input(struct gpio_chip *chip,
 	} else if (offset < 118)  { /* WIFI control bits, nothing to do */
 	}
 
-	spin_unlock_irqrestore(&priv->lock, flags);
 
 	return 0;
 }
@@ -253,11 +249,9 @@ static int ts7800v2_gpio_direction_output(struct gpio_chip *chip,
 {
 	struct ts7800v2_gpio_priv *priv = to_gpio_ts7800v2(chip);
 	unsigned int reg, reg_num, bit;
-	unsigned long flags;
 
 	int ret = 0;
 
-	spin_lock_irqsave(&priv->lock, flags);
 
 	priv->direction[offset / 32] &= ~(1 << offset % 32);
 	bit = 1 << dio_bitpositions[offset];
@@ -268,7 +262,6 @@ static int ts7800v2_gpio_direction_output(struct gpio_chip *chip,
 		if (offset == 8) {
 			dev_info(priv->gpio_chip.parent, "error: DIO #%d, read-only pin, can't make an output\n",
 						priv->gpio_chip.base + offset);
-			spin_unlock_irqrestore(&priv->lock, flags);
 			return -EINVAL;
 		}
 		reg_num = 0x08;
@@ -289,7 +282,6 @@ static int ts7800v2_gpio_direction_output(struct gpio_chip *chip,
 		reg_num = 0x18;
 	} else if (offset < 116) { /* pc/104 Row D */
 		if (offset >= 104 && offset <= 107) {  /* D[4..7], read-only pins */
-			spin_unlock_irqrestore(&priv->lock, flags);
 			return -EINVAL;
 		}
 		reg = readl(priv->syscon + 0x2C);
@@ -305,7 +297,6 @@ static int ts7800v2_gpio_direction_output(struct gpio_chip *chip,
 	} else if (offset == 120) { /* CPU_ACCESS_FPGA_FLASH */
 		reg_num = 0x08;
 	} else {
-		spin_unlock_irqrestore(&priv->lock, flags);
 		return -EINVAL;
 	}
 
@@ -318,7 +309,6 @@ static int ts7800v2_gpio_direction_output(struct gpio_chip *chip,
 
 	writel(reg, priv->syscon + reg_num);
 	priv->direction[offset / 32] &= ~(1 << offset % 32);
-	spin_unlock_irqrestore(&priv->lock, flags);
 
 	return ret;
 }
@@ -354,15 +344,11 @@ static void ts7800v2_gpio_set(struct gpio_chip *chip, unsigned int offset,
 {
 	struct ts7800v2_gpio_priv *priv = to_gpio_ts7800v2(chip);
 	unsigned int reg_num, reg, bit;
-	unsigned long flags;
-
-	spin_lock_irqsave(&priv->lock, flags);
 
 	if (offset < 26) {   /* DIO or LCD header,  */
 		if (offset == 8)  { /* SPI_MISO, read-only pin, can't set */
 			dev_info(priv->gpio_chip.parent, "error: DIO #%d, read-only pin, can't be set\n",
 						priv->gpio_chip.base + offset);
-			spin_unlock_irqrestore(&priv->lock, flags);
 			return;
 		}
 		reg_num = 0x08;
@@ -372,7 +358,6 @@ static void ts7800v2_gpio_set(struct gpio_chip *chip, unsigned int offset,
 		reg_num = 0x14;
 	} else if (offset < 101) { /* pc/104 Row C */
 		if (offset >= 104 && offset <= 107) {  /* D[4..7], read-only pins */
-			spin_unlock_irqrestore(&priv->lock, flags);
 			return;
 		}
 		reg_num = 0x18;
@@ -387,7 +372,6 @@ static void ts7800v2_gpio_set(struct gpio_chip *chip, unsigned int offset,
 	} else if (offset == 120) { /* CPU_ACCESS_FPGA_FLASH */
 		reg_num = 0x08;
 	} else {
-		spin_unlock_irqrestore(&priv->lock, flags);
 		return;
 	}
 
@@ -404,7 +388,6 @@ static void ts7800v2_gpio_set(struct gpio_chip *chip, unsigned int offset,
 
 	writel(reg, priv->syscon + reg_num);
 
-	spin_unlock_irqrestore(&priv->lock, flags);
 }
 
 static const struct gpio_chip template_chip = {
@@ -463,7 +446,7 @@ static int ts7800v2_gpio_child_to_parent_hwirq(struct gpio_chip *gc,
 {
 	int mapped_irq;
 	/* All these interrupts are level high in the CPU */
-	*parent_type = IRQ_TYPE_NONE;
+	*parent_type = IRQ_TYPE_EDGE_BOTH;
 
 	mapped_irq = ts7800v2_gpio_irq_get_parent_hwirq(gc, child);
 	if (mapped_irq < 0)
@@ -520,7 +503,6 @@ static int ts7800v2_gpio_probe(struct platform_device *pdev)
 	reg = readl(priv->syscon + 8) | 0x3ff7ffff;
 	writel(reg, priv->syscon + 8);
 
-	spin_lock_init(&priv->lock);
 	priv->gpio_chip = template_chip;
 	priv->gpio_chip.label = "ts7800v2-gpio";
 	priv->gpio_chip.ngpio = TS7800V2_NR_DIO;
